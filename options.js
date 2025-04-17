@@ -1,4 +1,4 @@
-// Tab Memory Manager - Options Page Script
+// TabHibernate - Options Page Script
 
 // Default settings
 const DEFAULT_SETTINGS = {
@@ -43,6 +43,11 @@ addDomainButton.addEventListener("click", addDomain)
 saveButton.addEventListener("click", saveSettings)
 resetButton.addEventListener("click", resetSettings)
 adaptiveModeToggle.addEventListener("change", toggleAdaptiveMode)
+newDomainInput.addEventListener("keypress", (event) => {
+    if (event.key === "Enter") {
+        addDomain()
+    }
+})
 
 // Load settings from storage
 async function loadSettings() {
@@ -148,8 +153,9 @@ function renderImportantDomains() {
     if (sortedDomains.length === 0) {
         const emptyItem = document.createElement("li")
         emptyItem.textContent = "No data yet"
-        emptyItem.style.color = "var(--text-secondary)"
+        emptyItem.style.color = "var(--gray-500)"
         emptyItem.style.fontStyle = "italic"
+        emptyItem.style.padding = "var(--space-8) var(--space-16)"
         importantDomainsElement.appendChild(emptyItem)
         return
     }
@@ -175,13 +181,13 @@ function addDomain() {
     const domain = newDomainInput.value.trim().toLowerCase()
 
     if (!domain) {
-        alert("Please enter a valid domain")
+        showToast("Please enter a valid domain", "error")
         return
     }
 
     // Check if domain already exists
     if (currentSettings.excludedDomains.includes(domain)) {
-        alert("This domain is already in the list")
+        showToast("This domain is already in the list", "warning")
         return
     }
 
@@ -191,6 +197,7 @@ function addDomain() {
     // Clear input and update UI
     newDomainInput.value = ""
     renderDomainList()
+    showToast(`Added ${domain} to excluded domains`, "success")
 }
 
 // Render the list of excluded domains
@@ -200,8 +207,10 @@ function renderDomainList() {
     if (currentSettings.excludedDomains.length === 0) {
         const emptyItem = document.createElement("li")
         emptyItem.textContent = "No domains added"
-        emptyItem.style.color = "var(--text-secondary)"
+        emptyItem.style.color = "var(--gray-500)"
         emptyItem.style.fontStyle = "italic"
+        emptyItem.style.textAlign = "center"
+        emptyItem.style.padding = "var(--space-12) var(--space-16)"
         domainList.appendChild(emptyItem)
         return
     }
@@ -228,6 +237,7 @@ function renderDomainList() {
 function removeDomain(domain) {
     currentSettings.excludedDomains = currentSettings.excludedDomains.filter((d) => d !== domain)
     renderDomainList()
+    showToast(`Removed ${domain} from excluded domains`, "info")
 }
 
 // Save settings to storage
@@ -250,10 +260,13 @@ async function saveSettings() {
         await chrome.storage.local.set({ settings: currentSettings })
 
         // Show success message
+        showToast("Settings saved successfully!", "success")
+
+        // Visual feedback on save button
         const saveButton = document.getElementById("saveSettings")
         const originalText = saveButton.textContent
         saveButton.textContent = "Saved!"
-        saveButton.style.backgroundColor = "var(--success-color)"
+        saveButton.style.backgroundColor = "var(--success)"
 
         setTimeout(() => {
             saveButton.textContent = originalText
@@ -261,7 +274,7 @@ async function saveSettings() {
         }, 1500)
     } catch (error) {
         console.error("Error saving settings:", error)
-        alert("Error saving settings. Please try again.")
+        showToast("Error saving settings. Please try again.", "error")
     }
 }
 
@@ -292,15 +305,25 @@ function resetSettings() {
 
         // Save to storage
         chrome.storage.local.set({ settings: currentSettings })
+
+        showToast("Settings reset to defaults", "info")
     }
 }
 
 // Update statistics display
 async function updateStatistics() {
     try {
-        // Ensure chrome is available
-        if (typeof chrome === "undefined" || !chrome.tabs) {
+        // Check if chrome is available
+        if (typeof chrome === "undefined" || typeof chrome.tabs === "undefined") {
             console.warn("chrome.tabs is not available. Running in a non-extension environment?")
+            // Mock chrome object for testing purposes
+            window.chrome = window.chrome || {}
+            chrome.tabs = chrome.tabs || {
+                query: (options, callback) => {
+                    console.warn("Mock chrome.tabs.query called. Returning empty array.")
+                    callback([])
+                },
+            }
             return
         }
 
@@ -319,14 +342,180 @@ async function updateStatistics() {
         // Estimate memory saved (rough estimate: ~50MB per unloaded tab)
         const memorySaved = unloadedTabs * 50
 
-        // Update UI
-        totalTabsElement.textContent = totalTabs
-        unloadedTabsElement.textContent = unloadedTabs
-        memorySavedElement.textContent = `${memorySaved} MB`
+        // Update UI with animation
+        animateCounter(totalTabsElement, totalTabs)
+        animateCounter(unloadedTabsElement, unloadedTabs)
+        animateCounter(memorySavedElement, memorySaved, " MB")
 
-        // Update every 5 seconds
-        setTimeout(updateStatistics, 5000)
+        // Update every 10 seconds
+        setTimeout(updateStatistics, 10000)
     } catch (error) {
         console.error("Error updating statistics:", error)
     }
+}
+
+// Animate counter from current to target value
+function animateCounter(element, targetValue, suffix = "") {
+    const currentValue = Number.parseInt(element.textContent) || 0
+    const duration = 800 // ms
+    const stepTime = 20 // ms
+    const steps = duration / stepTime
+    const increment = (targetValue - currentValue) / steps
+
+    let currentStep = 0
+    const timer = setInterval(() => {
+        currentStep++
+        const newValue = Math.round(currentValue + increment * currentStep)
+        element.textContent = newValue + suffix
+
+        if (currentStep >= steps) {
+            element.textContent = targetValue + suffix
+            clearInterval(timer)
+        }
+    }, stepTime)
+}
+
+// Show toast notification
+function showToast(message, type = "info") {
+    // Create toast container if it doesn't exist
+    let toastContainer = document.querySelector(".toast-container")
+    if (!toastContainer) {
+        toastContainer = document.createElement("div")
+        toastContainer.className = "toast-container"
+        document.body.appendChild(toastContainer)
+
+        // Add styles
+        const style = document.createElement("style")
+        style.textContent = `
+        .toast-container {
+          position: fixed;
+          bottom: 20px;
+          right: 20px;
+          z-index: 1000;
+        }
+        
+        .toast {
+          padding: 12px 16px;
+          margin-top: 8px;
+          border-radius: 6px;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+          display: flex;
+          align-items: center;
+          font-size: 14px;
+          min-width: 250px;
+          max-width: 350px;
+          animation: toast-in 0.3s ease-out forwards;
+          color: white;
+        }
+        
+        .toast.success {
+          background-color: var(--success);
+        }
+        
+        .toast.error {
+          background-color: var(--error);
+        }
+        
+        .toast.warning {
+          background-color: var(--warning);
+        }
+        
+        .toast.info {
+          background-color: var(--info);
+        }
+        
+        .toast-icon {
+          margin-right: 12px;
+        }
+        
+        .toast-message {
+          flex: 1;
+        }
+        
+        .toast-close {
+          background: none;
+          border: none;
+          color: white;
+          opacity: 0.7;
+          cursor: pointer;
+          font-size: 16px;
+          padding: 0 4px;
+        }
+        
+        .toast-close:hover {
+          opacity: 1;
+        }
+        
+        @keyframes toast-in {
+          from {
+            transform: translateY(100%);
+            opacity: 0;
+          }
+          to {
+            transform: translateY(0);
+            opacity: 1;
+          }
+        }
+        
+        @keyframes toast-out {
+          from {
+            transform: translateY(0);
+            opacity: 1;
+          }
+          to {
+            transform: translateY(100%);
+            opacity: 0;
+          }
+        }
+      `
+        document.head.appendChild(style)
+    }
+
+    // Create toast element
+    const toast = document.createElement("div")
+    toast.className = `toast ${type}`
+
+    // Icon based on type
+    let iconSvg = ""
+    switch (type) {
+        case "success":
+            iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`
+            break
+        case "error":
+            iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>`
+            break
+        case "warning":
+            iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`
+            break
+        default:
+            iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`
+    }
+
+    toast.innerHTML = `
+      <div class="toast-icon">${iconSvg}</div>
+      <div class="toast-message">${message}</div>
+      <button class="toast-close">&times;</button>
+    `
+
+    // Add to container
+    toastContainer.appendChild(toast)
+
+    // Close button functionality
+    const closeButton = toast.querySelector(".toast-close")
+    closeButton.addEventListener("click", () => {
+        removeToast(toast)
+    })
+
+    // Auto remove after 3 seconds
+    setTimeout(() => {
+        removeToast(toast)
+    }, 3000)
+}
+
+// Remove toast with animation
+function removeToast(toast) {
+    toast.style.animation = "toast-out 0.3s forwards"
+    setTimeout(() => {
+        toast.remove()
+    }, 300)
 }
