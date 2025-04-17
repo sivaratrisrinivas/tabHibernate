@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tab Memory Manager Settings</title>
+    <title>TabHibernate Settings</title>
     <link rel="stylesheet" href="options.css">
 </head>
 
@@ -12,7 +12,7 @@
     <div class="container">
         <header>
             <h1>TabHibernate Settings</h1>
-            <p>Configure how the extension manages your tabs to optimize memory usage</p>
+            <p>Configure how TabHibernate manages your tabs to optimize memory usage</p>
         </header>
 
         <main>
@@ -22,6 +22,7 @@
                 <div class="setting">
                     <div class="setting-header">
                         <label for="enabled">Enable TabHibernate</label>
+                        <span class="description">Turn tab hibernation on or off</span>
                     </div>
                     <div class="setting-control">
                         <label class="switch">
@@ -70,7 +71,7 @@
                 <div class="setting">
                     <div class="setting-header">
                         <label for="inactivityThreshold">Inactivity Threshold (minutes)</label>
-                        <span class="description">Tabs inactive for this long will be unloaded</span>
+                        <span class="description">Tabs inactive for this long will be hibernated</span>
                     </div>
                     <div class="setting-control range-control">
                         <input type="range" id="inactivityThreshold" min="1" max="60" value="10">
@@ -81,7 +82,7 @@
                 <div class="setting">
                     <div class="setting-header">
                         <label for="excludePinnedTabs">Exclude Pinned Tabs</label>
-                        <span class="description">Pinned tabs will never be unloaded</span>
+                        <span class="description">Pinned tabs will never be hibernated</span>
                     </div>
                     <div class="setting-control">
                         <label class="switch">
@@ -94,7 +95,7 @@
                 <div class="setting">
                     <div class="setting-header">
                         <label for="showIndicators">Show Visual Indicators</label>
-                        <span class="description">Display an indicator on unloaded tabs</span>
+                        <span class="description">Display an indicator on hibernated tabs</span>
                     </div>
                     <div class="setting-control">
                         <label class="switch">
@@ -107,7 +108,7 @@
 
             <section class="card">
                 <h2>Excluded Domains</h2>
-                <p>Tabs from these domains will never be unloaded</p>
+                <p>Tabs from these domains will never be hibernated</p>
 
                 <div class="excluded-domains">
                     <div class="domain-input">
@@ -125,15 +126,15 @@
                 <h2>Statistics</h2>
                 <div class="stats">
                     <div class="stat-item">
-                        <span class="stat-label">Total Tabs:</span>
+                        <span class="stat-label">Total Tabs</span>
                         <span id="totalTabs" class="stat-value">0</span>
                     </div>
                     <div class="stat-item">
-                        <span class="stat-label">Unloaded Tabs:</span>
+                        <span class="stat-label">Hibernated Tabs</span>
                         <span id="unloadedTabs" class="stat-value">0</span>
                     </div>
                     <div class="stat-item">
-                        <span class="stat-label">Estimated Memory Saved:</span>
+                        <span class="stat-label">Memory Saved</span>
                         <span id="memorySaved" class="stat-value">0 MB</span>
                     </div>
                 </div>
