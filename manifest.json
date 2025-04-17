@@ -1,6 +1,6 @@
 {
     "manifest_version": 3,
-    "name": "Tab Memory Manager",
+    "name": "TabHibernate",
     "version": "1.0.0",
     "description": "Reduces memory usage by unloading inactive tabs while preserving their state",
     "permissions": [
