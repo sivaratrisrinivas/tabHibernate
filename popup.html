@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tab Memory Manager</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>Tab Memory Manager</h1>
+            <div class="toggle-container">
+                <label class="switch">
+                    <input type="checkbox" id="enableToggle">
+                    <span class="slider round"></span>
+                </label>
+                <span id="statusText">Enabled</span>
+            </div>
+        </header>
+
+        <div class="adaptive-badge">
+            <span>Mode: </span>
+            <span id="adaptiveStatus" class="status adaptive">Adaptive</span>
+        </div>
+
+        <div class="stats-container">
+            <div class="stat-item">
+                <span class="stat-value" id="totalTabs">0</span>
+                <span class="stat-label">Total Tabs</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value" id="unloadedTabs">0</span>
+                <span class="stat-label">Unloaded</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-value" id="memorySaved">0 MB</span>
+                <span class="stat-label">Memory Saved</span>
+            </div>
+        </div>
+
+        <div class="current-tab">
+            <h2>Current Tab</h2>
+            <div class="tab-info" id="currentTabInfo">
+                <p>Status: <span id="tabStatus">Active</span></p>
+                <p>Last active: <span id="lastActive">Now</span></p>
+            </div>
+        </div>
+
+        <div class="actions">
+            <button id="unloadButton" class="action-button">Unload Inactive Tabs</button>
+            <button id="settingsButton" class="action-button secondary">Settings</button>
+        </div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+
+</html>
