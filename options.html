@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tab Memory Manager Settings</title>
+    <link rel="stylesheet" href="options.css">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>Tab Memory Manager Settings</h1>
+            <p>Configure how the extension manages your tabs to optimize memory usage</p>
+        </header>
+
+        <main>
+            <section class="card">
+                <h2>General Settings</h2>
+
+                <div class="setting">
+                    <div class="setting-header">
+                        <label for="enabled">Enable Tab Memory Manager</label>
+                    </div>
+                    <div class="setting-control">
+                        <label class="switch">
+                            <input type="checkbox" id="enabled" checked>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="setting">
+                    <div class="setting-header">
+                        <label for="adaptiveMode">Adaptive Mode</label>
+                        <span class="description">Automatically adjust settings based on your browsing habits</span>
+                    </div>
+                    <div class="setting-control">
+                        <label class="switch">
+                            <input type="checkbox" id="adaptiveMode" checked>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div id="adaptiveSection" class="adaptive-section">
+                    <div class="adaptive-status-container">
+                        <span>Status: </span>
+                        <span id="adaptiveStatus" class="status-learning">Learning your browsing habits</span>
+                    </div>
+
+                    <div id="learningProgressContainer" class="progress-container">
+                        <div class="progress-bar">
+                            <div id="learningProgress" class="progress" style="width: 25%">25%</div>
+                        </div>
+                        <span class="description">Learning period: 24 hours</span>
+                    </div>
+
+                    <div class="important-domains-container">
+                        <h3>Your Important Domains</h3>
+                        <p class="description">These domains are detected as important to you and will be prioritized
+                        </p>
+                        <ul id="importantDomains" class="important-domains-list">
+                            <!-- Important domains will be added here dynamically -->
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="setting">
+                    <div class="setting-header">
+                        <label for="inactivityThreshold">Inactivity Threshold (minutes)</label>
+                        <span class="description">Tabs inactive for this long will be unloaded</span>
+                    </div>
+                    <div class="setting-control range-control">
+                        <input type="range" id="inactivityThreshold" min="1" max="60" value="10">
+                        <span id="thresholdValue">10</span>
+                    </div>
+                </div>
+
+                <div class="setting">
+                    <div class="setting-header">
+                        <label for="excludePinnedTabs">Exclude Pinned Tabs</label>
+                        <span class="description">Pinned tabs will never be unloaded</span>
+                    </div>
+                    <div class="setting-control">
+                        <label class="switch">
+                            <input type="checkbox" id="excludePinnedTabs" checked>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="setting">
+                    <div class="setting-header">
+                        <label for="showIndicators">Show Visual Indicators</label>
+                        <span class="description">Display an indicator on unloaded tabs</span>
+                    </div>
+                    <div class="setting-control">
+                        <label class="switch">
+                            <input type="checkbox" id="showIndicators" checked>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Excluded Domains</h2>
+                <p>Tabs from these domains will never be unloaded</p>
+
+                <div class="excluded-domains">
+                    <div class="domain-input">
+                        <input type="text" id="newDomain" placeholder="e.g., example.com">
+                        <button id="addDomain">Add</button>
+                    </div>
+
+                    <ul id="domainList" class="domain-list">
+                        <!-- Domains will be added here dynamically -->
+                    </ul>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Statistics</h2>
+                <div class="stats">
+                    <div class="stat-item">
+                        <span class="stat-label">Total Tabs:</span>
+                        <span id="totalTabs" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Unloaded Tabs:</span>
+                        <span id="unloadedTabs" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Estimated Memory Saved:</span>
+                        <span id="memorySaved" class="stat-value">0 MB</span>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <button id="saveSettings" class="primary-button">Save Settings</button>
+            <button id="resetSettings" class="secondary-button">Reset to Defaults</button>
+        </footer>
+    </div>
+
+    <script src="options.js"></script>
+</body>
+
+</html>
