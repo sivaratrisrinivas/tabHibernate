@@ -3,7 +3,7 @@
 
 // Default settings - these will be adjusted automatically based on usage patterns
 const DEFAULT_SETTINGS = {
-    inactivityThreshold: 5, // minutes - Adjusted for user testing
+    inactivityThreshold: 10, // minutes - Default value for production
     excludePinnedTabs: true,
     excludedDomains: [],
     enabled: true,
@@ -203,27 +203,20 @@ async function checkInactiveTabs(manual = false) {
     const currentThreshold = settings.adaptiveMode && !settings.learningPeriod ? getAdaptiveThreshold() : settings.inactivityThreshold;
     const inactivityThresholdMs = currentThreshold * 60 * 1000;
 
-    console.log(`--- Running checkInactiveTabs at ${new Date().toLocaleTimeString()} --- Threshold: ${currentThreshold} min (${inactivityThresholdMs}ms) ---`);
-
     for (const tab of tabs) {
-        console.log(`Checking Tab ${tab.id}: ${tab.title || tab.url}`);
         // Skip if tab is active or doesn't have a recorded activity
         if (tab.active) {
-            console.log(`  - Skipping: Tab is active.`);
             continue;
         }
         if (!tabActivity[tab.id]) {
-            console.log(`  - Skipping: No activity recorded.`);
             continue;
         }
 
         // Skip excluded tabs
         if (settings.excludePinnedTabs && tab.pinned) {
-            console.log(`  - Skipping: Pinned tab.`);
             continue;
         }
         if (isExcludedDomain(tab.url)) {
-            console.log(`  - Skipping: Domain excluded.`);
             continue;
         }
 
@@ -232,7 +225,6 @@ async function checkInactiveTabs(manual = false) {
         if (settings.adaptiveMode && !settings.learningPeriod) {
             const important = isImportantTab(tab.url);
             if (important) {
-                console.log(`  - Skipping: Considered important (Adaptive Mode).`);
                 importantSkip = true;
             }
         }
@@ -241,16 +233,11 @@ async function checkInactiveTabs(manual = false) {
         // Check if tab is inactive for longer than threshold
         const lastActivity = tabActivity[tab.id];
         const inactiveDuration = currentTime - lastActivity;
-        console.log(`  - Last Activity: ${new Date(lastActivity).toLocaleTimeString()} (${Math.round(inactiveDuration / 1000)}s ago)`);
 
         if (inactiveDuration > inactivityThresholdMs) {
-            console.log(`  - RESULT: Inactive duration (${Math.round(inactiveDuration / 1000)}s) > threshold (${Math.round(inactivityThresholdMs / 1000)}s). UNLOADING.`);
             await unloadTab(tab)
-        } else {
-            console.log(`  - RESULT: Inactive duration (${Math.round(inactiveDuration / 1000)}s) <= threshold (${Math.round(inactivityThresholdMs / 1000)}s). Keeping.`);
         }
     }
-    console.log(`--- Finished checkInactiveTabs ---`);
 }
 
 // Get adaptive threshold based on system memory and usage patterns
@@ -289,10 +276,6 @@ function isImportantTab(url) {
     }
 
     const isImportant = score > 10; // Threshold for importance
-    // Log the check details only if adaptive mode is relevant
-    if (settings.adaptiveMode && !settings.learningPeriod) {
-        console.log(`  - Importance Check for ${url}: ${isImportant} (${reason})`);
-    }
     return isImportant;
 }
 
@@ -313,14 +296,12 @@ function isExcludedDomain(url) {
 async function unloadTab(tab) {
     try {
         // First, save the tab state by sending a message and awaiting the response
-        console.log(`Requesting state save for tab ${tab.id}`);
         const response = await chrome.tabs.sendMessage(tab.id, { type: "saveState" });
 
         // Check if state was successfully received and save it
         if (response && response.success && response.state) {
             const tabIdStr = tab.id.toString();
             await chrome.storage.local.set({ [tabIdStr]: response.state });
-            console.log(`Saved state for tab ${tab.id}:`, response.state);
         } else {
             console.warn(`Could not save state for tab ${tab.id}. Response:`, response);
         }
@@ -375,7 +356,6 @@ async function analyzeUsagePatterns() {
         if (domainsToExclude.length > 0) {
             settings.excludedDomains = [...new Set([...settings.excludedDomains, ...domainsToExclude])]
             await chrome.storage.local.set({ settings })
-            console.log("Automatically added excluded domains:", domainsToExclude)
         }
 
         // Save updated patterns
