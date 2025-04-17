@@ -22,31 +22,33 @@ function saveTabState() {
         timestamp: Date.now(),
     }
 
-    chrome.runtime.sendMessage({
-        type: "saveState",
-        state: state,
-    })
-
+    // State is sent back via sendResponse in the listener
     return state
 }
 
 // Restore the tab state
 function restoreTabState() {
     // We need to wait for the page to fully load before restoring scroll position
-    if (document.readyState === "complete") {
+    const attemptRestore = () => {
         chrome.runtime.sendMessage({ type: "getState" }, (response) => {
-            if (response && response.state && response.state.scroll) {
-                window.scrollTo(0, response.state.scroll)
+            // Add error checking
+            if (chrome.runtime.lastError) {
+                console.warn("Error getting tab state:", chrome.runtime.lastError.message);
+                return;
             }
-        })
+            if (response && response.state && typeof response.state.scroll === 'number') {
+                console.log("Restoring scroll position to:", response.state.scroll);
+                window.scrollTo(0, response.state.scroll);
+            } else {
+                console.log("No state found or state format incorrect for restoring scroll.");
+            }
+        });
+    };
+
+    if (document.readyState === "complete") {
+        attemptRestore();
     } else {
-        window.addEventListener("load", () => {
-            chrome.runtime.sendMessage({ type: "getState" }, (response) => {
-                if (response && response.state && response.state.scroll) {
-                    window.scrollTo(0, response.state.scroll)
-                }
-            })
-        })
+        window.addEventListener("load", attemptRestore);
     }
 }
 

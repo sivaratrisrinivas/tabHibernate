@@ -106,13 +106,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (sender.tab.url) {
             trackTabInteraction(sender.tab.url)
         }
-
-        sendResponse({ success: true })
     } else if (message.type === "manualUnload") {
         checkInactiveTabs(true)
-        sendResponse({ success: true })
+    } else if (message.type === "getState" && sender.tab) {
+        // Handle request for saved state
+        const tabIdStr = sender.tab.id.toString();
+        (async () => {
+            try {
+                const data = await chrome.storage.local.get(tabIdStr);
+                if (data && data[tabIdStr]) {
+                    console.log(`Found state for tab ${tabIdStr}:`, data[tabIdStr]);
+                    sendResponse({ state: data[tabIdStr] });
+                } else {
+                    console.log(`No state found for tab ${tabIdStr}`);
+                    sendResponse({ state: null }); // Explicitly send null
+                }
+            } catch (e) {
+                console.error(`Error getting state for tab ${tabIdStr}:`, e);
+                sendResponse({ state: null }); // Send null on error
+            }
+        })();
+        return true; // Indicate asynchronous response
     }
-    return true
+    return true; // If not handling asynchronously, return false or undefined
 })
 
 // Track tab domain for usage patterns
@@ -284,15 +300,40 @@ function isExcludedDomain(url) {
 // Unload a tab and save its state
 async function unloadTab(tab) {
     try {
-        // First, save the tab state by injecting a content script
-        await chrome.tabs.sendMessage(tab.id, { type: "saveState" })
+        // First, save the tab state by sending a message and awaiting the response
+        console.log(`Requesting state save for tab ${tab.id}`);
+        const response = await chrome.tabs.sendMessage(tab.id, { type: "saveState" });
 
-        // Then discard the tab
-        await chrome.tabs.discard(tab.id)
+        // Check if state was successfully received and save it
+        if (response && response.success && response.state) {
+            const tabIdStr = tab.id.toString();
+            await chrome.storage.local.set({ [tabIdStr]: response.state });
+            console.log(`Saved state for tab ${tab.id}:`, response.state);
+        } else {
+            console.warn(`Could not save state for tab ${tab.id}. Response:`, response);
+        }
 
-        console.log(`Unloaded tab: ${tab.id} - ${tab.title}`)
+        // Then discard the tab (only after attempting to save state)
+        await chrome.tabs.discard(tab.id);
+        console.log(`Unloaded tab: ${tab.id} - ${tab.title}`);
+
+        // Optionally, remove the state from storage after discarding if it's no longer needed
+        // await chrome.storage.local.remove(tab.id.toString());
+
     } catch (error) {
-        console.error(`Error unloading tab ${tab.id}:`, error)
+        // Check if the error is because the content script isn't available (e.g., chrome:// pages)
+        if (error.message.includes("Could not establish connection") || error.message.includes("Receiving end does not exist")) {
+            console.warn(`Cannot save state for tab ${tab.id} (likely a protected page or content script issue): ${tab.url}`);
+            // Discard anyway if saving state failed because the content script isn't there
+            try {
+                await chrome.tabs.discard(tab.id);
+                console.log(`Unloaded tab without saved state: ${tab.id} - ${tab.title}`);
+            } catch (discardError) {
+                console.error(`Error discarding tab ${tab.id} after state save failure:`, discardError);
+            }
+        } else {
+            console.error(`Error unloading tab ${tab.id}:`, error);
+        }
     }
 }
 
