@@ -2,7 +2,7 @@
     "manifest_version": 3,
     "name": "TabHibernate",
     "version": "1.0.0",
-    "description": "Reduces memory usage by unloading inactive tabs while preserving their state",
+    "description": "Intelligently hibernates inactive tabs to save memory while preserving their state",
     "permissions": [
         "tabs",
         "storage",
