@@ -22,31 +22,40 @@ function saveTabState() {
         timestamp: Date.now(),
     }
 
-    chrome.runtime.sendMessage({
-        type: "saveState",
-        state: state,
-    })
-
+    // State is sent back via sendResponse in the listener
     return state
 }
 
 // Restore the tab state
 function restoreTabState() {
     // We need to wait for the page to fully load before restoring scroll position
-    if (document.readyState === "complete") {
+    const attemptRestore = () => {
         chrome.runtime.sendMessage({ type: "getState" }, (response) => {
-            if (response && response.state && response.state.scroll) {
-                window.scrollTo(0, response.state.scroll)
-            }
-        })
-    } else {
-        window.addEventListener("load", () => {
-            chrome.runtime.sendMessage({ type: "getState" }, (response) => {
-                if (response && response.state && response.state.scroll) {
-                    window.scrollTo(0, response.state.scroll)
+            // Add error checking
+            if (chrome.runtime.lastError) {
+                // Don't spam console if background simply didn't have state - check message
+                if (chrome.runtime.lastError.message !== "The message port closed before a response was received.") {
+                    console.warn("Error getting tab state:", chrome.runtime.lastError.message);
                 }
-            })
-        })
+                return;
+            }
+            // Check response, state, and scroll type
+            if (response && response.state && typeof response.state.scroll === 'number') {
+                console.log("Restoring scroll position to:", response.state.scroll);
+                window.scrollTo(0, response.state.scroll);
+            } else {
+                // Don't log if state was explicitly null
+                if (!(response && response.state === null)) {
+                    console.log("No valid scroll state found to restore.");
+                }
+            }
+        });
+    };
+
+    if (document.readyState === "complete") {
+        attemptRestore();
+    } else {
+        window.addEventListener("load", attemptRestore);
     }
 }
 

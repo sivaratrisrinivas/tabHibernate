@@ -3,7 +3,7 @@
 
 // Default settings - these will be adjusted automatically based on usage patterns
 const DEFAULT_SETTINGS = {
-    inactivityThreshold: 0.1, // minutes - Temporary low value for testing!
+    inactivityThreshold: 5, // minutes - Adjusted for user testing
     excludePinnedTabs: true,
     excludedDomains: [],
     enabled: true,
@@ -55,11 +55,6 @@ async function initialize() {
         periodInMinutes: 30, // Analyze every 30 minutes
     })
 
-    // Check system memory periodically
-    chrome.alarms.create("checkSystemMemory", {
-        periodInMinutes: 5,
-    })
-
     // If in learning period, set an alarm to end it after 24 hours
     if (settings.learningPeriod) {
         chrome.alarms.create("endLearningPeriod", {
@@ -101,18 +96,34 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "userActivity" && sender.tab) {
         tabActivity[sender.tab.id] = Date.now()
-
-        // Track interaction with this domain
         if (sender.tab.url) {
             trackTabInteraction(sender.tab.url)
         }
-
-        sendResponse({ success: true })
+        return false; // No async response needed currently
     } else if (message.type === "manualUnload") {
         checkInactiveTabs(true)
-        sendResponse({ success: true })
+        return false; // No async response needed currently
+    } else if (message.type === "getState" && sender.tab) {
+        // Handle request for saved state from content script
+        const tabIdStr = sender.tab.id.toString();
+        (async () => {
+            try {
+                const data = await chrome.storage.local.get(tabIdStr);
+                if (data && data[tabIdStr]) {
+                    console.log(`[${new Date().toLocaleTimeString()}] Found state for tab ${tabIdStr}, sending to content script:`, data[tabIdStr]);
+                    sendResponse({ state: data[tabIdStr] });
+                } else {
+                    console.log(`[${new Date().toLocaleTimeString()}] No state found for tab ${tabIdStr} in storage.`);
+                    sendResponse({ state: null });
+                }
+            } catch (e) {
+                console.error(`[${new Date().toLocaleTimeString()}] Error getting state for tab ${tabIdStr}:`, e);
+                sendResponse({ state: null }); // Send null on error
+            }
+        })();
+        return true; // Indicate asynchronous response
     }
-    return true
+    return false;
 })
 
 // Track tab domain for usage patterns
@@ -247,19 +258,8 @@ function getAdaptiveThreshold() {
     // Base threshold
     let threshold = settings.inactivityThreshold
 
-    // Adjust based on available memory (lower threshold when memory is low)
-    if (systemMemoryInfo.available && systemMemoryInfo.total) {
-        const memoryRatio = systemMemoryInfo.available / systemMemoryInfo.total
-
-        if (memoryRatio < 0.2) {
-            // Less than 20% memory available - be more aggressive
-            threshold = Math.max(5, threshold - 5)
-        } else if (memoryRatio > 0.5) {
-            // More than 50% memory available - be more lenient
-            threshold = Math.min(30, threshold + 5)
-        }
-    }
-
+    // TODO: Future enhancement? Adjust threshold based *only* on overall usage patterns?
+    // For now, adaptive threshold (when memory check removed) is just the base setting.
     return threshold
 }
 
@@ -312,15 +312,39 @@ function isExcludedDomain(url) {
 // Unload a tab and save its state
 async function unloadTab(tab) {
     try {
-        // First, save the tab state by injecting a content script
-        await chrome.tabs.sendMessage(tab.id, { type: "saveState" })
+        // First, save the tab state by sending a message and awaiting the response
+        console.log(`Requesting state save for tab ${tab.id}`);
+        const response = await chrome.tabs.sendMessage(tab.id, { type: "saveState" });
 
-        // Then discard the tab
-        await chrome.tabs.discard(tab.id)
+        // Check if state was successfully received and save it
+        if (response && response.success && response.state) {
+            const tabIdStr = tab.id.toString();
+            await chrome.storage.local.set({ [tabIdStr]: response.state });
+            console.log(`Saved state for tab ${tab.id}:`, response.state);
+        } else {
+            console.warn(`Could not save state for tab ${tab.id}. Response:`, response);
+        }
 
-        console.log(`Hibernated tab: ${tab.id} - ${tab.title}`)
+        // Then discard the tab (only after attempting to save state)
+        await chrome.tabs.discard(tab.id);
+        console.log(`Hibernated tab: ${tab.id} - ${tab.title}`);
+
+        // Note: State remains in storage until tab is closed (onRemoved) or potentially overwritten
+
     } catch (error) {
-        console.error(`Error hibernating tab ${tab.id}:`, error)
+        // Check if the error is because the content script isn't available (e.g., chrome:// pages)
+        if (error.message.includes("Could not establish connection") || error.message.includes("Receiving end does not exist")) {
+            console.warn(`Cannot save state for tab ${tab.id} (likely a protected page or content script issue): ${tab.url}`);
+            // Discard anyway if saving state failed because the content script isn't there
+            try {
+                await chrome.tabs.discard(tab.id);
+                console.log(`Hibernated tab without saved state: ${tab.id} - ${tab.title}`);
+            } catch (discardError) {
+                console.error(`Error discarding tab ${tab.id} after state save failure:`, discardError);
+            }
+        } else {
+            console.error(`Error hibernating tab ${tab.id}:`, error);
+        }
     }
 }
 
@@ -361,21 +385,6 @@ async function analyzeUsagePatterns() {
     }
 }
 
-// Check system memory
-async function checkSystemMemory() {
-    try {
-        // Chrome doesn't provide direct memory API, but we can use performance API
-        if (performance && performance.memory) {
-            systemMemoryInfo = {
-                total: performance.memory.jsHeapSizeLimit,
-                available: performance.memory.jsHeapSizeLimit - performance.memory.usedJSHeapSize,
-            }
-        }
-    } catch (e) {
-        console.error("Error checking system memory:", e)
-    }
-}
-
 // End learning period
 async function endLearningPeriod() {
     if (settings.learningPeriod) {
@@ -394,8 +403,6 @@ chrome.alarms.onAlarm.addListener((alarm) => {
         checkInactiveTabs()
     } else if (alarm.name === "analyzeUsagePatterns") {
         analyzeUsagePatterns()
-    } else if (alarm.name === "checkSystemMemory") {
-        checkSystemMemory()
     } else if (alarm.name === "endLearningPeriod") {
         endLearningPeriod()
     }
