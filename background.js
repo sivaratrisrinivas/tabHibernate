@@ -3,7 +3,7 @@
 
 // Default settings - these will be adjusted automatically based on usage patterns
 const DEFAULT_SETTINGS = {
-    inactivityThreshold: 10, // minutes - will be adjusted automatically
+    inactivityThreshold: 0.1, // minutes - Temporary low value for testing!
     excludePinnedTabs: true,
     excludedDomains: [],
     enabled: true,
