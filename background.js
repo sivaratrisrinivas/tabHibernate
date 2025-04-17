@@ -189,38 +189,57 @@ async function checkInactiveTabs(manual = false) {
 
     const tabs = await chrome.tabs.query({})
     const currentTime = Date.now()
+    const currentThreshold = settings.adaptiveMode && !settings.learningPeriod ? getAdaptiveThreshold() : settings.inactivityThreshold;
+    const inactivityThresholdMs = currentThreshold * 60 * 1000;
 
-    // Get adaptive threshold based on system memory if not in manual mode
-    let inactivityThresholdMs
-
-    if (manual) {
-        // For manual unloading, use a shorter threshold
-        inactivityThresholdMs = 5 * 60 * 1000 // 5 minutes
-    } else if (settings.adaptiveMode && !settings.learningPeriod) {
-        // Use adaptive threshold based on system memory and usage patterns
-        inactivityThresholdMs = getAdaptiveThreshold() * 60 * 1000
-    } else {
-        // Use the configured threshold
-        inactivityThresholdMs = settings.inactivityThreshold * 60 * 1000
-    }
+    console.log(`--- Running checkInactiveTabs at ${new Date().toLocaleTimeString()} --- Threshold: ${currentThreshold} min (${inactivityThresholdMs}ms) ---`);
 
     for (const tab of tabs) {
+        console.log(`Checking Tab ${tab.id}: ${tab.title || tab.url}`);
         // Skip if tab is active or doesn't have a recorded activity
-        if (tab.active || !tabActivity[tab.id]) continue
+        if (tab.active) {
+            console.log(`  - Skipping: Tab is active.`);
+            continue;
+        }
+        if (!tabActivity[tab.id]) {
+            console.log(`  - Skipping: No activity recorded.`);
+            continue;
+        }
 
         // Skip excluded tabs
-        if (settings.excludePinnedTabs && tab.pinned) continue
-        if (isExcludedDomain(tab.url)) continue
+        if (settings.excludePinnedTabs && tab.pinned) {
+            console.log(`  - Skipping: Pinned tab.`);
+            continue;
+        }
+        if (isExcludedDomain(tab.url)) {
+            console.log(`  - Skipping: Domain excluded.`);
+            continue;
+        }
 
-        // Skip important tabs if we're in adaptive mode
-        if (settings.adaptiveMode && isImportantTab(tab.url)) continue
+        // Skip important tabs if we're in adaptive mode and not learning
+        let importantSkip = false;
+        if (settings.adaptiveMode && !settings.learningPeriod) {
+            const important = isImportantTab(tab.url);
+            if (important) {
+                console.log(`  - Skipping: Considered important (Adaptive Mode).`);
+                importantSkip = true;
+            }
+        }
+        if (importantSkip) continue;
 
         // Check if tab is inactive for longer than threshold
-        const lastActivity = tabActivity[tab.id]
-        if (currentTime - lastActivity > inactivityThresholdMs) {
+        const lastActivity = tabActivity[tab.id];
+        const inactiveDuration = currentTime - lastActivity;
+        console.log(`  - Last Activity: ${new Date(lastActivity).toLocaleTimeString()} (${Math.round(inactiveDuration / 1000)}s ago)`);
+
+        if (inactiveDuration > inactivityThresholdMs) {
+            console.log(`  - RESULT: Inactive duration (${Math.round(inactiveDuration / 1000)}s) > threshold (${Math.round(inactivityThresholdMs / 1000)}s). UNLOADING.`);
             await unloadTab(tab)
+        } else {
+            console.log(`  - RESULT: Inactive duration (${Math.round(inactiveDuration / 1000)}s) <= threshold (${Math.round(inactivityThresholdMs / 1000)}s). Keeping.`);
         }
     }
+    console.log(`--- Finished checkInactiveTabs ---`);
 }
 
 // Get adaptive threshold based on system memory and usage patterns
@@ -246,26 +265,35 @@ function getAdaptiveThreshold() {
 
 // Check if a tab is considered important based on usage patterns
 function isImportantTab(url) {
-    if (!url) return false
+    if (!url) return false;
+    let score = 0; // Default score
+    let reason = "No pattern data";
 
     try {
-        const domain = new URL(url).hostname
+        const domain = new URL(url).hostname;
 
         if (tabUsagePatterns[domain]) {
             // Calculate importance score based on interaction count and active time
-            const pattern = tabUsagePatterns[domain]
-            const importanceScore =
-                pattern.interactionCount / Math.max(1, pattern.openCount) +
-                pattern.totalActiveTime / (1000 * 60 * Math.max(1, pattern.openCount))
-
-            // Consider a tab important if score is above threshold
-            return importanceScore > 10
+            const pattern = tabUsagePatterns[domain];
+            // Give slightly more weight to interaction count
+            score =
+                (pattern.interactionCount / Math.max(1, pattern.openCount)) * 1.5 +
+                (pattern.totalActiveTime / (1000 * 60 * Math.max(1, pattern.openCount)));
+            reason = `Score: ${score.toFixed(2)} (Interactions: ${pattern.interactionCount}, Open: ${pattern.openCount}, ActiveMin: ${Math.round(pattern.totalActiveTime / 60000)})`;
+        } else {
+            reason = `No pattern data for domain: ${domain}`;
         }
     } catch (e) {
-        console.error("Error checking important tab:", e)
+        console.error("Error checking important tab:", e);
+        reason = "Error during check";
     }
 
-    return false
+    const isImportant = score > 10; // Threshold for importance
+    // Log the check details only if adaptive mode is relevant
+    if (settings.adaptiveMode && !settings.learningPeriod) {
+        console.log(`  - Importance Check for ${url}: ${isImportant} (${reason})`);
+    }
+    return isImportant;
 }
 
 // Check if a URL belongs to an excluded domain
