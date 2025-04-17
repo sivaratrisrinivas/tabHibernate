@@ -1,4 +1,4 @@
-// Tab Memory Manager - Popup Script
+// TabHibernate - Popup Script
 
 // DOM Elements
 const enableToggle = document.getElementById("enableToggle")
@@ -8,9 +8,11 @@ const unloadedTabsElement = document.getElementById("unloadedTabs")
 const memorySavedElement = document.getElementById("memorySaved")
 const tabStatusElement = document.getElementById("tabStatus")
 const lastActiveElement = document.getElementById("lastActive")
+const tabImportanceElement = document.getElementById("tabImportance")
 const unloadButton = document.getElementById("unloadButton")
 const settingsButton = document.getElementById("settingsButton")
 const adaptiveStatusElement = document.getElementById("adaptiveStatus")
+const helpLink = document.getElementById("helpLink")
 
 // Current settings and state
 let settings = {}
@@ -24,6 +26,7 @@ document.addEventListener("DOMContentLoaded", initialize)
 enableToggle.addEventListener("change", toggleExtension)
 unloadButton.addEventListener("click", unloadInactiveTabs)
 settingsButton.addEventListener("click", openSettings)
+helpLink.addEventListener("click", openHelp)
 
 // Initialize the popup
 async function initialize() {
@@ -38,21 +41,8 @@ async function initialize() {
         enableToggle.checked = settings.enabled
         statusText.textContent = settings.enabled ? "Enabled" : "Disabled"
 
-        // Update adaptive mode status if present
-        if (adaptiveStatusElement) {
-            if (settings.adaptiveMode) {
-                if (settings.learningPeriod) {
-                    adaptiveStatusElement.textContent = "Learning"
-                    adaptiveStatusElement.className = "status learning"
-                } else {
-                    adaptiveStatusElement.textContent = "Adaptive"
-                    adaptiveStatusElement.className = "status adaptive"
-                }
-            } else {
-                adaptiveStatusElement.textContent = "Manual"
-                adaptiveStatusElement.className = "status manual"
-            }
-        }
+        // Update adaptive mode status
+        updateAdaptiveStatus()
 
         // Update statistics
         updateStatistics()
@@ -61,6 +51,22 @@ async function initialize() {
         updateCurrentTabInfo()
     } catch (error) {
         console.error("Error initializing popup:", error)
+    }
+}
+
+// Update adaptive mode status display
+function updateAdaptiveStatus() {
+    if (settings.adaptiveMode) {
+        if (settings.learningPeriod) {
+            adaptiveStatusElement.textContent = "Learning"
+            adaptiveStatusElement.className = "status learning"
+        } else {
+            adaptiveStatusElement.textContent = "Adaptive"
+            adaptiveStatusElement.className = "status adaptive"
+        }
+    } else {
+        adaptiveStatusElement.textContent = "Manual"
+        adaptiveStatusElement.className = "status manual"
     }
 }
 
@@ -89,13 +95,34 @@ async function updateStatistics() {
         // Estimate memory saved (rough estimate: ~50MB per unloaded tab)
         const memorySaved = unloadedTabs * 50
 
-        // Update UI
-        totalTabsElement.textContent = totalTabs
-        unloadedTabsElement.textContent = unloadedTabs
-        memorySavedElement.textContent = `${memorySaved} MB`
+        // Update UI with animation
+        animateCounter(totalTabsElement, totalTabs)
+        animateCounter(unloadedTabsElement, unloadedTabs)
+        animateCounter(memorySavedElement, memorySaved, " MB")
     } catch (error) {
         console.error("Error updating statistics:", error)
     }
+}
+
+// Animate counter from current to target value
+function animateCounter(element, targetValue, suffix = "") {
+    const currentValue = Number.parseInt(element.textContent) || 0
+    const duration = 500 // ms
+    const stepTime = 20 // ms
+    const steps = duration / stepTime
+    const increment = (targetValue - currentValue) / steps
+
+    let currentStep = 0
+    const timer = setInterval(() => {
+        currentStep++
+        const newValue = Math.round(currentValue + increment * currentStep)
+        element.textContent = newValue + suffix
+
+        if (currentStep >= steps) {
+            element.textContent = targetValue + suffix
+            clearInterval(timer)
+        }
+    }, stepTime)
 }
 
 // Update current tab information
@@ -106,11 +133,11 @@ async function updateCurrentTabInfo() {
         if (tab) {
             // Check if tab is discarded
             if (tab.discarded) {
-                tabStatusElement.textContent = "Unloaded"
-                tabStatusElement.style.color = "var(--warning-color)"
+                tabStatusElement.textContent = "Hibernating"
+                tabStatusElement.className = "status-indicator status-hibernating"
             } else {
                 tabStatusElement.textContent = "Active"
-                tabStatusElement.style.color = "var(--success-color)"
+                tabStatusElement.className = "status-indicator status-active"
             }
 
             // Get last active time
@@ -136,16 +163,20 @@ async function updateCurrentTabInfo() {
                     const domain = new URL(tab.url).hostname
                     if (usagePatterns[domain]) {
                         const importance = usagePatterns[domain].importance || 0
-
-                        // Add importance info to the tab info section
-                        const tabInfo = document.getElementById("currentTabInfo")
-                        const importanceElement = document.createElement("p")
-                        importanceElement.innerHTML = `Importance: <span style="color: ${getImportanceColor(importance)}">${importance.toFixed(1)}</span>`
-                        tabInfo.appendChild(importanceElement)
+                        tabImportanceElement.textContent = getImportanceLabel(importance)
+                        tabImportanceElement.style.color = getImportanceColor(importance)
+                    } else {
+                        tabImportanceElement.textContent = "Unknown"
+                        tabImportanceElement.style.color = "var(--gray-500)"
                     }
                 } catch (e) {
                     console.error("Error getting domain importance:", e)
+                    tabImportanceElement.textContent = "Unknown"
+                    tabImportanceElement.style.color = "var(--gray-500)"
                 }
+            } else {
+                tabImportanceElement.textContent = settings.adaptiveMode ? "Calculating..." : "N/A"
+                tabImportanceElement.style.color = "var(--gray-500)"
             }
         }
     } catch (error) {
@@ -153,16 +184,33 @@ async function updateCurrentTabInfo() {
     }
 }
 
+// Get importance label based on score
+function getImportanceLabel(importance) {
+    if (importance > 15) return "High"
+    if (importance > 5) return "Medium"
+    return "Low"
+}
+
 // Get color based on importance score
 function getImportanceColor(importance) {
-    if (importance > 15) return "var(--success-color)"
-    if (importance > 5) return "var(--warning-color)"
-    return "var(--text-secondary)"
+    if (importance > 15) return "var(--success)"
+    if (importance > 5) return "var(--warning)"
+    return "var(--gray-500)"
 }
 
 // Manually unload inactive tabs
 async function unloadInactiveTabs() {
     try {
+        // Show loading state
+        unloadButton.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="animate-spin">
+        <circle cx="12" cy="12" r="10"></circle>
+        <path d="M12 6v6l4 2"></path>
+      </svg>
+      Processing...
+    `
+        unloadButton.disabled = true
+
         // Send message to background script
         chrome.runtime.sendMessage({ type: "manualUnload" }, (response) => {
             if (response && response.success) {
@@ -170,14 +218,36 @@ async function unloadInactiveTabs() {
                 setTimeout(updateStatistics, 500)
 
                 // Show success message
-                unloadButton.textContent = "Tabs Unloaded!"
+                unloadButton.innerHTML = `
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+          </svg>
+          Tabs Hibernated!
+        `
+
                 setTimeout(() => {
-                    unloadButton.textContent = "Unload Inactive Tabs"
+                    unloadButton.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18.364 5.636a9 9 0 1 1-12.728 0"></path>
+              <path d="M12 2v8"></path>
+            </svg>
+            Hibernate Tabs
+          `
+                    unloadButton.disabled = false
                 }, 1500)
             }
         })
     } catch (error) {
         console.error("Error unloading tabs:", error)
+        unloadButton.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18.364 5.636a9 9 0 1 1-12.728 0"></path>
+        <path d="M12 2v8"></path>
+      </svg>
+      Hibernate Tabs
+    `
+        unloadButton.disabled = false
     }
 }
 
@@ -185,3 +255,26 @@ async function unloadInactiveTabs() {
 function openSettings() {
     chrome.runtime.openOptionsPage()
 }
+
+// Open help page
+function openHelp() {
+    chrome.tabs.create({ url: "https://tabhibernate.com/help" })
+}
+
+// Add CSS animation for spinner
+const style = document.createElement("style")
+style.textContent = `
+  .animate-spin {
+    animation: spin 1s linear infinite;
+  }
+  
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+`
+document.head.appendChild(style)
