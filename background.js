@@ -1,65 +1,75 @@
 // TabHibernate - Background Script
 // Handles tab monitoring, inactivity detection, and tab unloading with adaptive behavior
 
-// Default settings - these will be adjusted automatically based on usage patterns
+const IMPORTANCE_INTERACTION_WEIGHT = 1.5;
+const IMPORTANCE_THRESHOLD_SKIP_HIBERNATE = 10; // Score above which a tab might be skipped
+const IMPORTANCE_THRESHOLD_AUTO_EXCLUDE = 20; // Score above which a domain might be auto-excluded
+const LEARNING_PERIOD_DURATION_MINUTES = 24 * 60; // 24 hours
+
+// Default settings
 const DEFAULT_SETTINGS = {
-    inactivityThreshold: 10, // minutes - Default value for production
+    inactivityThreshold: 10, // minutes
     excludePinnedTabs: true,
     excludedDomains: [],
     enabled: true,
     showIndicators: true,
-    adaptiveMode: true, // New setting for adaptive behavior
-    learningPeriod: true, // Initial learning period active
-}
+    adaptiveMode: true,
+    learningPeriod: true,
+    learningPeriodStartTime: 0, // Timestamp for when the current learning period started
+};
 
 // Store for tab activity timestamps and usage patterns
-const tabActivity = {}
-const tabUsagePatterns = {}
-let settings = DEFAULT_SETTINGS
-let systemMemoryInfo = { available: 0, total: 0 }
+const tabActivity = {};
+const tabUsagePatterns = {};
+let settings = { ...DEFAULT_SETTINGS };
+// let systemMemoryInfo = { available: 0, total: 0 }; // Removed, was unused
 
 // Initialize extension
 async function initialize() {
-    console.log("Initializing TabHibernate with adaptive behavior")
+    // console.log("Initializing TabHibernate with adaptive behavior");
 
-    // Load settings
-    const storedSettings = await chrome.storage.local.get(["settings", "usagePatterns"])
-    if (storedSettings.settings) {
-        settings = { ...DEFAULT_SETTINGS, ...storedSettings.settings }
+    const storedData = await chrome.storage.local.get(["settings", "usagePatterns"]);
+    if (storedData.settings) {
+        settings = { ...DEFAULT_SETTINGS, ...storedData.settings };
     } else {
-        await chrome.storage.local.set({ settings: DEFAULT_SETTINGS })
-    }
-
-    if (storedSettings.usagePatterns) {
-        Object.assign(tabUsagePatterns, storedSettings.usagePatterns)
-    }
-
-    // Initialize tab activity for existing tabs
-    const tabs = await chrome.tabs.query({})
-    tabs.forEach((tab) => {
-        tabActivity[tab.id] = Date.now()
-
-        // Start tracking this tab's usage pattern
-        if (tab.url) {
-            trackTabDomain(tab.url)
+        // First run or cleared storage
+        settings = { ...DEFAULT_SETTINGS };
+        if (settings.adaptiveMode && settings.learningPeriod) {
+            settings.learningPeriodStartTime = Date.now();
         }
-    })
+        await chrome.storage.local.set({ settings });
+    }
 
-    // Set up periodic check for inactive tabs
-    chrome.alarms.create("checkInactiveTabs", {
-        periodInMinutes: 1,
-    })
+    // Ensure learningPeriodStartTime is set if learning is active but start time is missing
+    if (settings.adaptiveMode && settings.learningPeriod && !settings.learningPeriodStartTime) {
+        settings.learningPeriodStartTime = Date.now();
+        // No need to await this save, it's not critical for startup flow
+        chrome.storage.local.set({ settings });
+    }
 
-    // Set up periodic analysis of usage patterns
-    chrome.alarms.create("analyzeUsagePatterns", {
-        periodInMinutes: 30, // Analyze every 30 minutes
-    })
 
-    // If in learning period, set an alarm to end it after 24 hours
-    if (settings.learningPeriod) {
-        chrome.alarms.create("endLearningPeriod", {
-            delayInMinutes: 1440, // 24 hours
-        })
+    if (storedData.usagePatterns) {
+        Object.assign(tabUsagePatterns, storedData.usagePatterns);
+    }
+
+    const tabs = await chrome.tabs.query({});
+    tabs.forEach((tab) => {
+        tabActivity[tab.id] = Date.now();
+        if (tab.url) {
+            trackTabDomain(tab.url); // Will initialize pattern if new, but won't save immediately
+        }
+    });
+
+    chrome.alarms.create("checkInactiveTabs", { periodInMinutes: 1 });
+    chrome.alarms.create("analyzeUsagePatterns", { periodInMinutes: 30 });
+
+    if (settings.adaptiveMode && settings.learningPeriod && settings.learningPeriodStartTime) {
+        const alreadyElapsedMinutes = (Date.now() - settings.learningPeriodStartTime) / (1000 * 60);
+        const remainingLearningMinutes = Math.max(1, LEARNING_PERIOD_DURATION_MINUTES - alreadyElapsedMinutes);
+        chrome.alarms.create("endLearningPeriod", { delayInMinutes: remainingLearningMinutes });
+    } else if (settings.adaptiveMode && settings.learningPeriod && !settings.learningPeriodStartTime) {
+        // Fallback if start time somehow wasn't set but should be
+        chrome.alarms.create("endLearningPeriod", { delayInMinutes: LEARNING_PERIOD_DURATION_MINUTES });
     }
 }
 
@@ -102,6 +112,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return false; // No async response needed currently
     } else if (message.type === "manualUnload") {
         checkInactiveTabs(true)
+        sendResponse({ success: true }) // Acknowledge manual unload trigger
         return false; // No async response needed currently
     } else if (message.type === "getState" && sender.tab) {
         // Handle request for saved state from content script
@@ -110,15 +121,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             try {
                 const data = await chrome.storage.local.get(tabIdStr);
                 if (data && data[tabIdStr]) {
-                    console.log(`[${new Date().toLocaleTimeString()}] Found state for tab ${tabIdStr}, sending to content script:`, data[tabIdStr]);
+                    // console.log(`[${new Date().toLocaleTimeString()}] Found state for tab ${tabIdStr}`);
                     sendResponse({ state: data[tabIdStr] });
                 } else {
-                    console.log(`[${new Date().toLocaleTimeString()}] No state found for tab ${tabIdStr} in storage.`);
+                    // console.log(`[${new Date().toLocaleTimeString()}] No state found for tab ${tabIdStr}`);
                     sendResponse({ state: null });
                 }
             } catch (e) {
-                console.error(`[${new Date().toLocaleTimeString()}] Error getting state for tab ${tabIdStr}:`, e);
-                sendResponse({ state: null }); // Send null on error
+                console.error(`Error getting state for tab ${tabIdStr}:`, e);
+                sendResponse({ state: null });
             }
         })();
         return true; // Indicate asynchronous response
@@ -133,10 +144,10 @@ function trackTabDomain(url) {
 
         if (!tabUsagePatterns[domain]) {
             tabUsagePatterns[domain] = {
-                openCount: 1,
+                openCount: 0, // Start at 0, increment below
                 interactionCount: 0,
                 totalActiveTime: 0,
-                lastActiveTime: Date.now(),
+                lastActiveTime: Date.now(), // Set on creation
                 importance: 0,
             }
         } else {
@@ -144,9 +155,9 @@ function trackTabDomain(url) {
         }
 
         // Save updated patterns periodically
-        saveUsagePatterns()
+        // saveUsagePatterns() // Removed: Save less frequently, e.g., via analyzeUsagePatterns alarm
     } catch (e) {
-        console.error("Error tracking tab domain:", e)
+        // console.error("Error tracking tab domain:", e)
     }
 }
 
@@ -160,7 +171,7 @@ function trackTabInteraction(url) {
             tabUsagePatterns[domain].lastActiveTime = Date.now()
         }
     } catch (e) {
-        console.error("Error tracking tab interaction:", e)
+        // console.error("Error tracking tab interaction:", e)
     }
 }
 
@@ -181,7 +192,7 @@ function trackTabActivation(url) {
             tabUsagePatterns[domain].lastActiveTime = now
         }
     } catch (e) {
-        console.error("Error tracking tab activation:", e)
+        // console.error("Error tracking tab activation:", e)
     }
 }
 
@@ -190,7 +201,7 @@ async function saveUsagePatterns() {
     try {
         await chrome.storage.local.set({ usagePatterns: tabUsagePatterns })
     } catch (e) {
-        console.error("Error saving usage patterns:", e)
+        // console.error("Error saving usage patterns:", e)
     }
 }
 
@@ -245,38 +256,28 @@ function getAdaptiveThreshold() {
     // Base threshold
     let threshold = settings.inactivityThreshold
 
-    // TODO: Future enhancement? Adjust threshold based *only* on overall usage patterns?
-    // For now, adaptive threshold (when memory check removed) is just the base setting.
+    // TODO: Future: Adjust threshold based on overall usage patterns or system memory.
+    // For now, "adaptive" primarily means skipping important tabs, not changing this value.
     return threshold
 }
 
 // Check if a tab is considered important based on usage patterns
 function isImportantTab(url) {
     if (!url) return false;
-    let score = 0; // Default score
-    let reason = "No pattern data";
+    let score = 0;
 
     try {
         const domain = new URL(url).hostname;
-
         if (tabUsagePatterns[domain]) {
-            // Calculate importance score based on interaction count and active time
             const pattern = tabUsagePatterns[domain];
-            // Give slightly more weight to interaction count
             score =
-                (pattern.interactionCount / Math.max(1, pattern.openCount)) * 1.5 +
+                (pattern.interactionCount / Math.max(1, pattern.openCount)) * IMPORTANCE_INTERACTION_WEIGHT +
                 (pattern.totalActiveTime / (1000 * 60 * Math.max(1, pattern.openCount)));
-            reason = `Score: ${score.toFixed(2)} (Interactions: ${pattern.interactionCount}, Open: ${pattern.openCount}, ActiveMin: ${Math.round(pattern.totalActiveTime / 60000)})`;
-        } else {
-            reason = `No pattern data for domain: ${domain}`;
         }
     } catch (e) {
-        console.error("Error checking important tab:", e);
-        reason = "Error during check";
+        // console.error("Error checking important tab:", e);
     }
-
-    const isImportant = score > 10; // Threshold for importance
-    return isImportant;
+    return score > IMPORTANCE_THRESHOLD_SKIP_HIBERNATE;
 }
 
 // Check if a URL belongs to an excluded domain
@@ -287,7 +288,7 @@ function isExcludedDomain(url) {
         const hostname = new URL(url).hostname
         return settings.excludedDomains.some((domain) => hostname.includes(domain))
     } catch (e) {
-        console.error("Error parsing URL:", e)
+        // console.error("Error parsing URL:", e)
         return false
     }
 }
@@ -295,37 +296,30 @@ function isExcludedDomain(url) {
 // Unload a tab and save its state
 async function unloadTab(tab) {
     try {
-        // First, save the tab state by sending a message and awaiting the response
-        const response = await chrome.tabs.sendMessage(tab.id, { type: "saveState" });
+        let response = null;
+        try {
+            response = await chrome.tabs.sendMessage(tab.id, { type: "saveState" });
+        } catch (e) {
+            // This catch is for sendMessage failures (e.g. no content script)
+            if (e.message.includes("Could not establish connection") || e.message.includes("Receiving end does not exist")) {
+                console.warn(`Cannot save state for tab ${tab.id} (no content script): ${tab.url}`);
+            } else {
+                console.error(`Error sending saveState to tab ${tab.id}:`, e);
+            }
+        }
 
-        // Check if state was successfully received and save it
         if (response && response.success && response.state) {
             const tabIdStr = tab.id.toString();
             await chrome.storage.local.set({ [tabIdStr]: response.state });
         } else {
-            console.warn(`Could not save state for tab ${tab.id}. Response:`, response);
+            // console.warn(`Could not get valid state for tab ${tab.id}. Response:`, response);
         }
 
-        // Then discard the tab (only after attempting to save state)
         await chrome.tabs.discard(tab.id);
-        console.log(`Hibernated tab: ${tab.id} - ${tab.title}`);
+        // console.log(`Hibernated tab: ${tab.id} - ${tab.title}`);
 
-        // Note: State remains in storage until tab is closed (onRemoved) or potentially overwritten
-
-    } catch (error) {
-        // Check if the error is because the content script isn't available (e.g., chrome:// pages)
-        if (error.message.includes("Could not establish connection") || error.message.includes("Receiving end does not exist")) {
-            console.warn(`Cannot save state for tab ${tab.id} (likely a protected page or content script issue): ${tab.url}`);
-            // Discard anyway if saving state failed because the content script isn't there
-            try {
-                await chrome.tabs.discard(tab.id);
-                console.log(`Hibernated tab without saved state: ${tab.id} - ${tab.title}`);
-            } catch (discardError) {
-                console.error(`Error discarding tab ${tab.id} after state save failure:`, discardError);
-            }
-        } else {
-            console.error(`Error hibernating tab ${tab.id}:`, error);
-        }
+    } catch (error) { // This catch is for discard errors or other issues in unloadTab
+        console.error(`Error hibernating tab ${tab.id} (after attempting state save):`, error);
     }
 }
 
@@ -334,32 +328,24 @@ async function analyzeUsagePatterns() {
     if (!settings.adaptiveMode || settings.learningPeriod) return
 
     try {
-        // Identify frequently used domains that should be excluded
         const domainsToExclude = []
 
         for (const [domain, pattern] of Object.entries(tabUsagePatterns)) {
-            // Calculate importance score
             const importanceScore =
-                pattern.interactionCount / Math.max(1, pattern.openCount) +
-                pattern.totalActiveTime / (1000 * 60 * Math.max(1, pattern.openCount))
+                (pattern.interactionCount / Math.max(1, pattern.openCount)) * IMPORTANCE_INTERACTION_WEIGHT +
+                (pattern.totalActiveTime / (1000 * 60 * Math.max(1, pattern.openCount)));
+            pattern.importance = importanceScore;
 
-            // Update importance score in the pattern
-            pattern.importance = importanceScore
-
-            // If domain is very important and not already excluded, add it
-            if (importanceScore > 20 && !settings.excludedDomains.includes(domain)) {
-                domainsToExclude.push(domain)
+            if (importanceScore > IMPORTANCE_THRESHOLD_AUTO_EXCLUDE && !settings.excludedDomains.includes(domain)) {
+                domainsToExclude.push(domain);
             }
         }
 
-        // Update excluded domains if we found new ones
         if (domainsToExclude.length > 0) {
-            settings.excludedDomains = [...new Set([...settings.excludedDomains, ...domainsToExclude])]
-            await chrome.storage.local.set({ settings })
+            settings.excludedDomains = [...new Set([...settings.excludedDomains, ...domainsToExclude])];
+            await chrome.storage.local.set({ settings }); // Save updated settings
         }
-
-        // Save updated patterns
-        saveUsagePatterns()
+        saveUsagePatterns(); // Save updated importance scores in patterns
     } catch (e) {
         console.error("Error analyzing usage patterns:", e)
     }
@@ -367,13 +353,12 @@ async function analyzeUsagePatterns() {
 
 // End learning period
 async function endLearningPeriod() {
-    if (settings.learningPeriod) {
-        settings.learningPeriod = false
-        await chrome.storage.local.set({ settings })
-        console.log("Learning period ended, adaptive mode fully active")
-
-        // Run initial analysis
-        analyzeUsagePatterns()
+    if (settings.adaptiveMode && settings.learningPeriod) {
+        settings.learningPeriod = false;
+        // settings.learningPeriodStartTime = 0; // Reset start time or keep for historical? Let's reset.
+        await chrome.storage.local.set({ settings });
+        console.log("Learning period ended, adaptive mode fully active.");
+        analyzeUsagePatterns(); // Run analysis once learning ends
     }
 }
 
@@ -391,7 +376,41 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 // Listen for settings changes
 chrome.storage.onChanged.addListener((changes, area) => {
     if (area === "local" && changes.settings) {
-        settings = changes.settings.newValue
+        const oldSettings = settings;
+        settings = { ...DEFAULT_SETTINGS, ...changes.settings.newValue };
+
+        // If adaptive mode was just turned on AND learning period is true
+        // (or if learning period was just turned on while adaptive mode is also on)
+        // then (re)set the learning start time and the alarm.
+        const newAdaptive = settings.adaptiveMode;
+        const oldAdaptive = oldSettings.adaptiveMode;
+        const newLearning = settings.learningPeriod;
+        const oldLearning = oldSettings.learningPeriod;
+
+        let updateLearningAlarm = false;
+
+        if (newAdaptive && newLearning) {
+            if ((!oldAdaptive && newAdaptive) || (!oldLearning && newLearning) || !settings.learningPeriodStartTime) {
+                settings.learningPeriodStartTime = Date.now();
+                chrome.storage.local.set({ settings }); // Save the updated start time
+                updateLearningAlarm = true;
+                console.log("Learning period initiated/reset by settings change.");
+            }
+        }
+
+        if (updateLearningAlarm || (newAdaptive && newLearning && oldSettings.learningPeriodStartTime !== settings.learningPeriodStartTime)) {
+            chrome.alarms.get("endLearningPeriod", (existingAlarm) => {
+                if (existingAlarm) chrome.alarms.clear("endLearningPeriod");
+                const alreadyElapsedMinutes = settings.learningPeriodStartTime ? (Date.now() - settings.learningPeriodStartTime) / (1000 * 60) : 0;
+                const remainingLearningMinutes = Math.max(1, LEARNING_PERIOD_DURATION_MINUTES - alreadyElapsedMinutes);
+                chrome.alarms.create("endLearningPeriod", { delayInMinutes: remainingLearningMinutes });
+            });
+        } else if (!newLearning || !newAdaptive) { // If learning or adaptive turned off, clear alarm
+            chrome.alarms.clear("endLearningPeriod");
+        }
+    }
+    if (area === "local" && changes.usagePatterns) {
+        Object.assign(tabUsagePatterns, changes.usagePatterns.newValue);
     }
 })
 

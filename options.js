@@ -1,5 +1,7 @@
 // TabHibernate - Options Page Script
 
+const LEARNING_PERIOD_DURATION_MINUTES = 24 * 60; // 24 hours, should match background.js
+
 // Default settings
 const DEFAULT_SETTINGS = {
     inactivityThreshold: 10, // minutes
@@ -101,43 +103,45 @@ function updateThresholdDisplay() {
 // Toggle adaptive mode UI elements
 function toggleAdaptiveMode() {
     const isAdaptive = adaptiveModeToggle.checked
-
-    // Show/hide adaptive-specific elements
     document.getElementById("adaptiveSection").style.display = isAdaptive ? "block" : "none"
 
-    // Disable/enable manual threshold if adaptive mode is on/off
     if (isAdaptive) {
         inactivitySlider.disabled = true
         document.querySelector(".setting-header label[for='inactivityThreshold']").textContent =
-            "Base Inactivity Threshold (minutes) - Automatically adjusted"
+            "Base Inactivity Threshold (minutes) - Important tabs are prioritized"
     } else {
         inactivitySlider.disabled = false
         document.querySelector(".setting-header label[for='inactivityThreshold']").textContent =
             "Inactivity Threshold (minutes)"
     }
+    updateLearningStatus()
 }
 
 // Update learning status display
 function updateLearningStatus() {
-    if (currentSettings.learningPeriod) {
-        // Calculate when the learning period started (24 hours ago)
-        const startTime = Date.now() - 24 * 60 * 60 * 1000
-        const endTime = startTime + 24 * 60 * 60 * 1000
-        const currentTime = Date.now()
-        const progress = Math.min(100, Math.round(((currentTime - startTime) / (endTime - startTime)) * 100))
+    if (currentSettings.adaptiveMode && currentSettings.learningPeriod && currentSettings.learningPeriodStartTime) {
+        const startTime = currentSettings.learningPeriodStartTime;
+        const totalDurationMs = LEARNING_PERIOD_DURATION_MINUTES * 60 * 1000;
+        const elapsedMs = Date.now() - startTime;
+        const progress = Math.min(100, Math.max(0, Math.round((elapsedMs / totalDurationMs) * 100)));
 
-        adaptiveStatusElement.textContent = "Learning your browsing habits"
-        adaptiveStatusElement.className = "status-learning"
+        adaptiveStatusElement.textContent = "Learning your browsing habits";
+        adaptiveStatusElement.className = "status-learning";
+        document.getElementById("learningProgressContainer").style.display = "block";
+        learningProgressElement.style.width = `${progress}%`;
+        learningProgressElement.textContent = `${progress}%`;
+        document.querySelector("#learningProgressContainer .description").textContent = `Learning period: ${LEARNING_PERIOD_DURATION_MINUTES / 60} hours`;
 
-        // Update progress bar
-        learningProgressElement.style.width = `${progress}%`
-        learningProgressElement.textContent = `${progress}%`
-    } else {
-        adaptiveStatusElement.textContent = "Fully adaptive"
-        adaptiveStatusElement.className = "status-active"
-
-        // Hide progress bar
-        document.getElementById("learningProgressContainer").style.display = "none"
+    } else if (currentSettings.adaptiveMode) { // Adaptive but not learning (or no start time)
+        adaptiveStatusElement.textContent = "Fully adaptive";
+        adaptiveStatusElement.className = "status-active";
+        document.getElementById("learningProgressContainer").style.display = "none";
+    } else { // Not adaptive mode
+        // The entire adaptiveSection is hidden by toggleAdaptiveMode, so this might not be strictly necessary
+        // but good for clarity if adaptiveSection could be visible for other reasons.
+        document.getElementById("learningProgressContainer").style.display = "none";
+        adaptiveStatusElement.textContent = "Manual Mode"; // Or some other appropriate status
+        adaptiveStatusElement.className = "status-manual"; // Example class
     }
 }
 
@@ -243,70 +247,80 @@ function removeDomain(domain) {
 // Save settings to storage
 async function saveSettings() {
     try {
-        // Ensure chrome is available
         if (typeof chrome === "undefined" || !chrome.storage) {
-            console.warn("chrome.storage is not available. Running in a non-extension environment?")
-            return
+            // console.warn("chrome.storage is not available.");
+            return;
         }
 
-        // Get values from UI
-        currentSettings.enabled = enabledToggle.checked
-        currentSettings.adaptiveMode = adaptiveModeToggle.checked
-        currentSettings.inactivityThreshold = Number.parseInt(inactivitySlider.value)
-        currentSettings.excludePinnedTabs = excludePinnedToggle.checked
-        currentSettings.showIndicators = showIndicatorsToggle.checked
+        const oldLearningPeriod = currentSettings.learningPeriod;
+        const oldAdaptiveMode = currentSettings.adaptiveMode;
 
-        // Save to storage
-        await chrome.storage.local.set({ settings: currentSettings })
+        currentSettings.enabled = enabledToggle.checked;
+        currentSettings.adaptiveMode = adaptiveModeToggle.checked;
+        currentSettings.inactivityThreshold = Number.parseInt(inactivitySlider.value);
+        currentSettings.excludePinnedTabs = excludePinnedToggle.checked;
+        currentSettings.showIndicators = showIndicatorsToggle.checked;
 
-        // Show success message
-        showToast("Settings saved successfully!", "success")
+        // If adaptive mode is being enabled, and learning period was off, or it just got enabled.
+        // Or if adaptive mode is on and learning was just enabled.
+        if (currentSettings.adaptiveMode && !oldAdaptiveMode && currentSettings.learningPeriod) {
+            // Freshly enabled adaptive mode and learning period is default true
+            currentSettings.learningPeriodStartTime = Date.now();
+        } else if (currentSettings.adaptiveMode && currentSettings.learningPeriod && !oldLearningPeriod) {
+            // Adaptive mode was on, and learning period was just toggled on
+            currentSettings.learningPeriodStartTime = Date.now();
+        } else if (!currentSettings.adaptiveMode) {
+            currentSettings.learningPeriodStartTime = 0; // Reset if adaptive mode is off
+        }
+        // Note: The background script also has logic to manage learningPeriodStartTime and alarms
+        // when settings change. This ensures the options page reflects a potential reset too.
 
-        // Visual feedback on save button
-        const saveButton = document.getElementById("saveSettings")
-        const originalText = saveButton.textContent
-        saveButton.textContent = "Saved!"
-        saveButton.style.backgroundColor = "var(--success)"
+        await chrome.storage.local.set({ settings: currentSettings });
+
+        showToast("Settings saved successfully!", "success");
+
+        saveButton.disabled = true;
+        saveButton.classList.add('success');
+        const originalText = saveButton.textContent;
+        saveButton.textContent = "Saved!";
 
         setTimeout(() => {
-            saveButton.textContent = originalText
-            saveButton.style.backgroundColor = ""
-        }, 1500)
+            saveButton.textContent = originalText;
+            saveButton.classList.remove('success');
+            saveButton.disabled = false;
+        }, 1500);
     } catch (error) {
-        console.error("Error saving settings:", error)
-        showToast("Error saving settings. Please try again.", "error")
+        console.error("Error saving settings:", error);
+        showToast("Error saving settings. Please try again.", "error");
+        // Add error state to button if desired
     }
 }
 
 // Reset settings to defaults
 function resetSettings() {
     if (confirm("Are you sure you want to reset all settings to defaults?")) {
-        currentSettings = { ...DEFAULT_SETTINGS }
-
-        // Update UI
-        enabledToggle.checked = currentSettings.enabled
-        adaptiveModeToggle.checked = currentSettings.adaptiveMode
-        inactivitySlider.value = currentSettings.inactivityThreshold
-        thresholdValue.textContent = currentSettings.inactivityThreshold
-        excludePinnedToggle.checked = currentSettings.excludePinnedTabs
-        showIndicatorsToggle.checked = currentSettings.showIndicators
-
-        // Update adaptive mode UI
-        toggleAdaptiveMode()
-
-        // Clear domains
-        renderDomainList()
-
-        // Ensure chrome is available
-        if (typeof chrome === "undefined" || !chrome.storage) {
-            console.warn("chrome.storage is not available. Running in a non-extension environment?")
-            return
+        const newDefaults = { ...DEFAULT_SETTINGS }; // Get fresh defaults
+        if (newDefaults.adaptiveMode && newDefaults.learningPeriod) {
+            newDefaults.learningPeriodStartTime = Date.now();
         }
+        currentSettings = newDefaults;
 
-        // Save to storage
-        chrome.storage.local.set({ settings: currentSettings })
+        enabledToggle.checked = currentSettings.enabled;
+        adaptiveModeToggle.checked = currentSettings.adaptiveMode;
+        inactivitySlider.value = currentSettings.inactivityThreshold;
+        thresholdValue.textContent = currentSettings.inactivityThreshold;
+        excludePinnedToggle.checked = currentSettings.excludePinnedTabs;
+        showIndicatorsToggle.checked = currentSettings.showIndicators;
 
-        showToast("Settings reset to defaults", "info")
+        toggleAdaptiveMode();
+        renderDomainList();
+        updateLearningStatus(); // Explicitly call to update based on new default learning state
+
+        if (typeof chrome !== "undefined" && chrome.storage) {
+            chrome.storage.local.set({ settings: currentSettings, usagePatterns: {} }); // Also clear usage patterns on reset
+            renderImportantDomains(); // Re-render important domains (will be empty)
+        }
+        showToast("Settings reset to defaults", "info");
     }
 }
 
@@ -315,207 +329,108 @@ async function updateStatistics() {
     try {
         // Check if chrome is available
         if (typeof chrome === "undefined" || typeof chrome.tabs === "undefined") {
-            console.warn("chrome.tabs is not available. Running in a non-extension environment?")
-            // Mock chrome object for testing purposes
-            window.chrome = window.chrome || {}
+            // console.warn("chrome.tabs is not available. Running in a non-extension environment?");
+            // Mock chrome object for testing purposes (consider removing for production)
+            window.chrome = window.chrome || {};
             chrome.tabs = chrome.tabs || {
                 query: (options, callback) => {
-                    console.warn("Mock chrome.tabs.query called. Returning empty array.")
-                    callback([])
+                    // console.warn("Mock chrome.tabs.query called. Returning empty array.");
+                    callback([]);
                 },
-            }
-            return
+            };
+            // return; // Decide if to return or let it try and fail if mock isn't enough
         }
 
         // Check if chrome.tabs.query is a function before calling it
         if (typeof chrome.tabs.query !== "function") {
-            console.warn("chrome.tabs.query is not a function. Running in a non-extension environment?")
-            return
+            // console.warn("chrome.tabs.query is not a function. Running in a non-extension environment?");
+            return;
         }
 
-        const tabs = await chrome.tabs.query({})
-        const totalTabs = tabs.length
+        const tabs = await chrome.tabs.query({});
+        const totalTabs = tabs.length;
+        const unloadedTabs = tabs.filter((tab) => tab.discarded).length;
+        const memorySaved = unloadedTabs * 50;
 
-        // Count discarded tabs
-        const unloadedTabs = tabs.filter((tab) => tab.discarded).length
-
-        // Estimate memory saved (rough estimate: ~50MB per unloaded tab)
-        const memorySaved = unloadedTabs * 50
-
-        // Update UI with animation
-        animateCounter(totalTabsElement, totalTabs)
-        animateCounter(unloadedTabsElement, unloadedTabs)
-        animateCounter(memorySavedElement, memorySaved, " MB")
+        // Update UI with animation - using animateCounter from utils.js
+        animateCounter(totalTabsElement, totalTabs, 800);
+        animateCounter(unloadedTabsElement, unloadedTabs, 800);
+        animateCounter(memorySavedElement, memorySaved, 800, " MB");
 
         // Update every 10 seconds
-        setTimeout(updateStatistics, 10000)
+        setTimeout(updateStatistics, 10000);
     } catch (error) {
-        console.error("Error updating statistics:", error)
+        // console.error("Error updating statistics:", error);
     }
 }
 
-// Animate counter from current to target value
-function animateCounter(element, targetValue, suffix = "") {
-    const currentValue = Number.parseInt(element.textContent) || 0
-    const duration = 800 // ms
-    const stepTime = 20 // ms
-    const steps = duration / stepTime
-    const increment = (targetValue - currentValue) / steps
+// Animate counter function removed, now in utils.js
 
-    let currentStep = 0
-    const timer = setInterval(() => {
-        currentStep++
-        const newValue = Math.round(currentValue + increment * currentStep)
-        element.textContent = newValue + suffix
-
-        if (currentStep >= steps) {
-            element.textContent = targetValue + suffix
-            clearInterval(timer)
-        }
-    }, stepTime)
-}
-
-// Show toast notification
-function showToast(message, type = "info") {
-    // Create toast container if it doesn't exist
-    let toastContainer = document.querySelector(".toast-container")
+// Ensure toast container exists once
+let toastContainer = null;
+function ensureToastContainer() {
     if (!toastContainer) {
-        toastContainer = document.createElement("div")
-        toastContainer.className = "toast-container"
-        document.body.appendChild(toastContainer)
-
-        // Add styles
-        const style = document.createElement("style")
-        style.textContent = `
-        .toast-container {
-          position: fixed;
-          bottom: 20px;
-          right: 20px;
-          z-index: 1000;
-        }
-        
-        .toast {
-          padding: 12px 16px;
-          margin-top: 8px;
-          border-radius: 6px;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-          display: flex;
-          align-items: center;
-          font-size: 14px;
-          min-width: 250px;
-          max-width: 350px;
-          animation: toast-in 0.3s ease-out forwards;
-          color: white;
-        }
-        
-        .toast.success {
-          background-color: var(--success);
-        }
-        
-        .toast.error {
-          background-color: var(--error);
-        }
-        
-        .toast.warning {
-          background-color: var(--warning);
-        }
-        
-        .toast.info {
-          background-color: var(--info);
-        }
-        
-        .toast-icon {
-          margin-right: 12px;
-        }
-        
-        .toast-message {
-          flex: 1;
-        }
-        
-        .toast-close {
-          background: none;
-          border: none;
-          color: white;
-          opacity: 0.7;
-          cursor: pointer;
-          font-size: 16px;
-          padding: 0 4px;
-        }
-        
-        .toast-close:hover {
-          opacity: 1;
-        }
-        
-        @keyframes toast-in {
-          from {
-            transform: translateY(100%);
-            opacity: 0;
-          }
-          to {
-            transform: translateY(0);
-            opacity: 1;
-          }
-        }
-        
-        @keyframes toast-out {
-          from {
-            transform: translateY(0);
-            opacity: 1;
-          }
-          to {
-            transform: translateY(100%);
-            opacity: 0;
-          }
-        }
-      `
-        document.head.appendChild(style)
+        toastContainer = document.createElement("div");
+        toastContainer.className = "toast-container";
+        document.body.appendChild(toastContainer);
     }
+    return toastContainer;
+}
 
-    // Create toast element
-    const toast = document.createElement("div")
-    toast.className = `toast ${type}`
+// Store SVG icons to avoid creating them repeatedly
+const TOAST_ICONS = {
+    success: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`,
+    error: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>`,
+    warning: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`,
+    info: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`
+};
 
-    // Icon based on type
-    let iconSvg = ""
-    switch (type) {
-        case "success":
-            iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`
-            break
-        case "error":
-            iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>`
-            break
-        case "warning":
-            iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`
-            break
-        default:
-            iconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`
-    }
+// Show toast notification (Refactored)
+function showToast(message, type = "info") {
+    const container = ensureToastContainer();
+
+    const toast = document.createElement("div");
+    toast.className = `toast ${type}`;
+
+    const iconSvg = TOAST_ICONS[type] || TOAST_ICONS.info;
 
     toast.innerHTML = `
-      <div class="toast-icon">${iconSvg}</div>
-      <div class="toast-message">${message}</div>
-      <button class="toast-close">&times;</button>
-    `
+      <span class="toast-icon">${iconSvg}</span>
+      <span class="toast-message"></span>
+      <button type="button" class="toast-close">&times;</button>
+    `;
+    // Safely set the message text to prevent XSS if message could ever contain HTML
+    toast.querySelector(".toast-message").textContent = message;
 
-    // Add to container
-    toastContainer.appendChild(toast)
+    container.appendChild(toast);
 
-    // Close button functionality
-    const closeButton = toast.querySelector(".toast-close")
-    closeButton.addEventListener("click", () => {
-        removeToast(toast)
-    })
-
-    // Auto remove after 3 seconds
+    // Trigger the animation
+    // Timeout ensures the 'show' class is added after the element is in the DOM and opacity 0 is set.
     setTimeout(() => {
-        removeToast(toast)
-    }, 3000)
+        toast.classList.add("show");
+    }, 10); // Small delay for transition to trigger
+
+    const closeButton = toast.querySelector(".toast-close");
+    closeButton.addEventListener("click", () => removeToast(toast));
+
+    setTimeout(() => {
+        removeToast(toast);
+    }, 3000);
 }
 
-// Remove toast with animation
+// Remove toast with animation (Refactored)
 function removeToast(toast) {
-    toast.style.animation = "toast-out 0.3s forwards"
+    toast.classList.remove("show");
+    // Wait for fade out animation to complete before removing from DOM
+    toast.addEventListener('transitionend', () => {
+        if (toast.parentElement) { // Check if still in DOM
+            toast.remove();
+        }
+    }, { once: true });
+    // Fallback if transitionend doesn't fire (e.g. if display:none is applied too quickly)
     setTimeout(() => {
-        toast.remove()
-    }, 300)
+        if (toast.parentElement) {
+            toast.remove();
+        }
+    }, 400); // slightly longer than CSS transition
 }

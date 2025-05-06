@@ -1,5 +1,8 @@
 // TabHibernate - Popup Script
 
+const IMPORTANCE_LABEL_HIGH_THRESHOLD = 15;
+const IMPORTANCE_LABEL_MEDIUM_THRESHOLD = 5;
+
 // DOM Elements
 const enableToggle = document.getElementById("enableToggle")
 const statusText = document.getElementById("statusText")
@@ -33,7 +36,7 @@ async function initialize() {
     try {
         // Load settings
         const data = await chrome.storage.local.get(["settings", "tabActivity", "usagePatterns"])
-        settings = data.settings || { enabled: true, adaptiveMode: true }
+        settings = data.settings || { enabled: true, adaptiveMode: true, learningPeriod: true }
         tabActivity = data.tabActivity || {}
         usagePatterns = data.usagePatterns || {}
 
@@ -88,41 +91,16 @@ async function updateStatistics() {
     try {
         const tabs = await chrome.tabs.query({})
         const totalTabs = tabs.length
-
-        // Count discarded tabs
         const unloadedTabs = tabs.filter((tab) => tab.discarded).length
-
-        // Estimate memory saved (rough estimate: ~50MB per unloaded tab)
         const memorySaved = unloadedTabs * 50
 
-        // Update UI with animation
-        animateCounter(totalTabsElement, totalTabs)
-        animateCounter(unloadedTabsElement, unloadedTabs)
-        animateCounter(memorySavedElement, memorySaved, " MB")
+        // Update UI with animation - using animateCounter from utils.js
+        animateCounter(totalTabsElement, totalTabs, 500)
+        animateCounter(unloadedTabsElement, unloadedTabs, 500)
+        animateCounter(memorySavedElement, memorySaved, 500, " MB")
     } catch (error) {
-        console.error("Error updating statistics:", error)
+        // console.error("Error updating statistics:", error); // Silenced for lean
     }
-}
-
-// Animate counter from current to target value
-function animateCounter(element, targetValue, suffix = "") {
-    const currentValue = Number.parseInt(element.textContent) || 0
-    const duration = 500 // ms
-    const stepTime = 20 // ms
-    const steps = duration / stepTime
-    const increment = (targetValue - currentValue) / steps
-
-    let currentStep = 0
-    const timer = setInterval(() => {
-        currentStep++
-        const newValue = Math.round(currentValue + increment * currentStep)
-        element.textContent = newValue + suffix
-
-        if (currentStep >= steps) {
-            element.textContent = targetValue + suffix
-            clearInterval(timer)
-        }
-    }, stepTime)
 }
 
 // Update current tab information
@@ -161,8 +139,8 @@ async function updateCurrentTabInfo() {
             if (tab.url && settings.adaptiveMode) {
                 try {
                     const domain = new URL(tab.url).hostname
-                    if (usagePatterns[domain]) {
-                        const importance = usagePatterns[domain].importance || 0
+                    if (usagePatterns[domain] && typeof usagePatterns[domain].importance !== 'undefined') {
+                        const importance = usagePatterns[domain].importance
                         tabImportanceElement.textContent = getImportanceLabel(importance)
                         tabImportanceElement.style.color = getImportanceColor(importance)
                     } else {
@@ -170,7 +148,7 @@ async function updateCurrentTabInfo() {
                         tabImportanceElement.style.color = "var(--gray-500)"
                     }
                 } catch (e) {
-                    console.error("Error getting domain importance:", e)
+                    // console.error("Error getting domain importance:", e); // Silenced
                     tabImportanceElement.textContent = "Unknown"
                     tabImportanceElement.style.color = "var(--gray-500)"
                 }
@@ -180,74 +158,66 @@ async function updateCurrentTabInfo() {
             }
         }
     } catch (error) {
-        console.error("Error updating current tab info:", error)
+        // console.error("Error updating current tab info:", error); // Silenced
     }
 }
 
 // Get importance label based on score
 function getImportanceLabel(importance) {
-    if (importance > 15) return "High"
-    if (importance > 5) return "Medium"
+    if (importance > IMPORTANCE_LABEL_HIGH_THRESHOLD) return "High"
+    if (importance > IMPORTANCE_LABEL_MEDIUM_THRESHOLD) return "Medium"
     return "Low"
 }
 
 // Get color based on importance score
 function getImportanceColor(importance) {
-    if (importance > 15) return "var(--success)"
-    if (importance > 5) return "var(--warning)"
+    if (importance > IMPORTANCE_LABEL_HIGH_THRESHOLD) return "var(--success)"
+    if (importance > IMPORTANCE_LABEL_MEDIUM_THRESHOLD) return "var(--warning)"
     return "var(--gray-500)"
 }
 
 // Manually unload inactive tabs
 async function unloadInactiveTabs() {
+    unloadButton.disabled = true;
+    unloadButton.classList.remove('success', 'error'); // Clear previous states
+    unloadButton.classList.add('loading');
+    // Original icon and text for loading state
+    const loadingIcon = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="animate-spin"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>';
+    unloadButton.innerHTML = `${loadingIcon} Processing...`;
+
     try {
-        // Show loading state
-        unloadButton.innerHTML = `
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="animate-spin">
-        <circle cx="12" cy="12" r="10"></circle>
-        <path d="M12 6v6l4 2"></path>
-      </svg>
-      Processing...
-    `
-        unloadButton.disabled = true
-
-        // Send message to background script
         chrome.runtime.sendMessage({ type: "manualUnload" }, (response) => {
+            unloadButton.classList.remove('loading');
             if (response && response.success) {
-                // Update statistics after unloading
-                setTimeout(updateStatistics, 500)
-
-                // Show success message
-                unloadButton.innerHTML = `
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-            <polyline points="22 4 12 14.01 9 11.01"></polyline>
-          </svg>
-          Tabs Hibernated!
-        `
+                setTimeout(updateStatistics, 200);
+                unloadButton.classList.add('success');
+                const successIcon = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>';
+                unloadButton.innerHTML = `${successIcon} Hibernated!`;
 
                 setTimeout(() => {
-                    unloadButton.innerHTML = `
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M18.364 5.636a9 9 0 1 1-12.728 0"></path>
-              <path d="M12 2v8"></path>
-            </svg>
-            Hibernate Tabs
-          `
-                    unloadButton.disabled = false
-                }, 1500)
+                    unloadButton.disabled = false;
+                    unloadButton.classList.remove('success');
+                    const defaultIcon = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.364 5.636a9 9 0 1 1-12.728 0"></path><path d="M12 2v8"></path></svg>';
+                    unloadButton.innerHTML = `${defaultIcon} Hibernate Tabs`;
+                }, 2000); // Increased timeout for success message visibility
+            } else {
+                unloadButton.disabled = false;
+                unloadButton.classList.add('error'); // Add error class for styling if needed
+                const defaultIcon = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.364 5.636a9 9 0 1 1-12.728 0"></path><path d="M12 2v8"></path></svg>';
+                unloadButton.innerHTML = `${defaultIcon} Error`; // Or specific error message
+                console.warn("Manual unload failed or no/error response:", response);
+                setTimeout(() => { // Revert after showing error briefly
+                    unloadButton.classList.remove('error');
+                    unloadButton.innerHTML = `${defaultIcon} Hibernate Tabs`;
+                }, 2000);
             }
-        })
+        });
     } catch (error) {
-        console.error("Error unloading tabs:", error)
-        unloadButton.innerHTML = `
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M18.364 5.636a9 9 0 1 1-12.728 0"></path>
-        <path d="M12 2v8"></path>
-      </svg>
-      Hibernate Tabs
-    `
-        unloadButton.disabled = false
+        console.error("Error sending manualUnload message:", error);
+        unloadButton.disabled = false;
+        unloadButton.classList.remove('loading', 'success', 'error');
+        const defaultIcon = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.364 5.636a9 9 0 1 1-12.728 0"></path><path d="M12 2v8"></path></svg>';
+        unloadButton.innerHTML = `${defaultIcon} Hibernate Tabs`;
     }
 }
 
@@ -260,21 +230,3 @@ function openSettings() {
 function openHelp() {
     chrome.tabs.create({ url: "https://tabhibernate.com/help" })
 }
-
-// Add CSS animation for spinner
-const style = document.createElement("style")
-style.textContent = `
-  .animate-spin {
-    animation: spin 1s linear infinite;
-  }
-  
-  @keyframes spin {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(360deg);
-    }
-  }
-`
-document.head.appendChild(style)
