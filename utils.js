@@ -1,7 +1,7 @@
 // TabHibernate - utils.js
 
 // Animate counter from current to target value
-function animateCounter(element, targetValue, duration = 800, suffix = "") {
+export function animateCounter(element, targetValue, duration = 800, suffix = "") {
     if (!element) {
         console.warn("animateCounter: Provided element is null or undefined.");
         return;
