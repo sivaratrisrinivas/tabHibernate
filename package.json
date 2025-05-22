@@ -1,0 +1,27 @@
+{
+  "name": "app",
+  "version": "1.0.0",
+  "description": "**Tired of your browser eating up all your memory?** TabHibernate is a Chrome extension designed to automatically unload (hibernate) inactive tabs, freeing up system resources while cleverly preserving the state of those tabs so you can jump right back in later.",
+  "main": "background.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sivaratrisrinivas/tabHibernate.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/sivaratrisrinivas/tabHibernate/issues"
+  },
+  "homepage": "https://github.com/sivaratrisrinivas/tabHibernate#readme",
+  "devDependencies": {
+    "@babel/core": "^7.27.1",
+    "@babel/preset-env": "^7.27.2",
+    "babel-jest": "^29.7.0",
+    "jest": "^27.5.1",
+    "jest-chrome": "^0.8.0"
+  }
+}
